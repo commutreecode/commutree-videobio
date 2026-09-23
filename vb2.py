@@ -96,20 +96,33 @@ def load(fn):
     return im
 
 PHOTO = load("p1.jpg"); PHOTO2 = load("p2.jpg")
+# p1 = intro only. Every detail scene uses p2 when it exists, so p1 is not repeated.
 DAD, MOM = load("father.jpg"), load("mother.jpg")
 HAS_PHOTO = PHOTO is not None
 PHOTO = PHOTO or placeholder()
 
-def photo_frame(w, h, zoom, rounded=24, src=None):
-    """Photo cropped inside a gold frame; zoom animates INSIDE the frame (text stays still)."""
-    zw, zh = int(w * zoom), int(h * zoom)
-    p = ImageOps.fit(src or PHOTO, (zw, zh), centering=(0.5, 0.28)).crop(((zw-w)//2, (zh-h)//2, (zw-w)//2 + w, (zh-h)//2 + h))
+def photo_frame(maxw, maxh, zoom=1.0, rounded=24, src=None):
+    """WHOLE photo inside a gold frame — never cropped. The frame takes the photo's own
+    aspect ratio (fitted inside maxw x maxh), so tall portraits stay tall and nothing is cut.
+    zoom scales the finished frame, so the picture still can't lose edges."""
+    im = src or PHOTO
+    w, h = maxw, maxh                                  # FIXED frame size for every photo
+    sc = min(w / im.width, h / im.height)
+    fw, fh = max(80, int(im.width * sc)), max(80, int(im.height * sc))
+    fit = im.resize((fw, fh), Image.LANCZOS)
+    if fw >= w - 2 and fh >= h - 2:
+        p = fit                                        # photo already fills the frame
+    else:                                              # fill the gap with the photo's own blur
+        p = ImageOps.fit(im, (w, h), centering=(0.5, 0.3)).filter(ImageFilter.GaussianBlur(28))
+        p = Image.blend(p, Image.new("RGB", (w, h), (30, 14, 8)), 0.35)
+        p.paste(fit, ((w - fw) // 2, (h - fh) // 2))
     im = Image.new("RGBA", (w + 28, h + 28)); m = Image.new("L", (w, h)); ImageDraw.Draw(m).rounded_rectangle([0, 0, w-1, h-1], rounded, fill=255)
     d = ImageDraw.Draw(im); d.rounded_rectangle([0, 0, w+27, h+27], rounded+10, fill=GOLD)
     d.rounded_rectangle([7, 7, w+20, h+20], rounded+6, fill=GOLD_L); im.paste(p, (14, 14), m)
     if not HAS_PHOTO:
         cap = text_sprite([("फोटो देखने के लिए CommuTree एप डाउनलोड करें", FB, 40, MAROON)], maxw=w-40)
         im.alpha_composite(cap, ((im.width - cap.width)//2, im.height - cap.height - 40))
+    if zoom != 1.0: im = im.resize((int(im.width * zoom), int(im.height * zoom)), Image.LANCZOS)
     return im
 def shadow(spr, blur=18, off=12, a=90):
     s = Image.new("RGBA", (spr.width + 80, spr.height + 80)); s.paste((60, 30, 10, a), (40, 40 + off), spr.split()[3])
@@ -145,8 +158,12 @@ CITY = text_sprite([(P.get("city",""), FR, 54, GOLD)]) if P.get("city") else Non
 DIV = divider(520)
 
 def s_intro(c, t):
-    fr = photo_frame(760, 900, 1.12 - 0.08 * ease(t / 4.5)); a = ease(t / 0.9)
-    put_center(c, shadow(fr), 390 - 40, a * 0.8, dy=30 * (1 - a)); put_center(c, fr, 390, a, dy=30 * (1 - a))
+    # Frame and photo are FIXED (no zoom, no scale) — a slow light sweep gives the motion
+    # instead, so the gold border never breathes.
+    fr = photo_frame(780, 940)
+    fr = shimmer(fr, (t - 1.4) / 2.2)
+    a = ease(t / 0.9)
+    put_center(c, shadow(fr), 390 - 40, a * 0.8); put_center(c, fr, 390, a)
     a2 = ease((t - 0.8) / 0.8); put_center(c, shimmer(NAME, (t - 1.6) / 1.2), 1360, a2, dy=40 * (1 - a2))
     k = ease((t - 1.3) / 0.8)
     if k > 0: d = DIV.crop((int(260 * (1 - k)), 0, int(260 + 260 * k), 30)); put_center(c, d, 1560)
@@ -154,10 +171,33 @@ def s_intro(c, t):
         a3 = ease((t - 1.6) / 0.8); put_center(c, CITY, 1605, a3, dy=25 * (1 - a3))
 
 def s_section(title, rows, photo=None, pair=None):
+    photo = photo or PHOTO2 or PHOTO
     rows = [(l, v) for l, v in rows if v]; PL = pill(title)
     if not rows: return None
-    RS = [text_sprite([(f"{l}", FB, 58, MAROON), ("  —  ", FR, 50, GOLD), (v, FB, 58, INK)], maxw=W-220) for l, v in rows]
-    top = 1020 + (4 - len(rows)) * 60
+    # Two-column table: labels left, values all starting at the SAME x, wrapped lines
+    # aligned under the value column (never centred, never randomly indented).
+    LAB = [text_sprite([(l, FB, 58, MAROON), ("  —", FR, 50, GOLD)], maxw=480) if l else None for l, _ in rows]
+    VX = 120 + max([sp.width for sp in LAB if sp] or [0]) + 18
+    VW = W - VX - 110
+
+    def wrap(v, size, sub=False):
+        words, lines, cur = v.split(" "), [], ""
+        for w in words:
+            t = (cur + " " + w).strip()
+            if tlen(t, FB, size) <= VW or not cur: cur = t
+            else: lines.append(cur); cur = w
+        if cur: lines.append(cur)
+        col = (90, 62, 48) if sub else INK
+        return [text_sprite([(l, FB, size, col)], maxw=VW) for l in lines]
+
+    RS = []                                  # (label_sprite_or_None, value_sprite, is_first_line)
+    MAXL = 3                                 # lines per row; shrink the font instead of truncating
+    for i, (l, v) in enumerate(rows):
+        for size in ((58, 52, 46, 42, 38) if l else (50, 46, 42, 38, 34)):
+            vs = wrap(v, size, sub=not l)
+            if len(vs) <= MAXL: break
+        for j, sp in enumerate(vs): RS.append((LAB[i] if j == 0 else None, sp, j == 0))
+    top = 1020 + (4 - len(RS)) * 60
     def fn(c, t):
         # Detail scenes: photo is FIXED (no zoom, no slide). Identical placement in every
         # detail scene means the crossfade leaves it visually static — only text moves.
@@ -166,11 +206,17 @@ def s_section(title, rows, photo=None, pair=None):
         a = ease((t - 0.35) / 0.6); sc = 0.85 + 0.15 * a
         pl = shimmer(PL, (t - 1.0) / 1.0).resize((int(PL.width * sc), int(PL.height * sc))) if a > 0 else PL
         put_center(c, pl, 1005 - pl.height // 2 - 20 + (PL.height - pl.height) // 2 + 0, a)
-        for i, r in enumerate(RS):
-            a = ease((t - 0.8 - i * 0.28) / 0.6)
-            put(c, r, 120 - 60 * (1 - a), top + 40 + i * 150, a)
-            k = ease((t - 1.0 - i * 0.28) / 0.6)
-            if k > 0: ImageDraw.Draw(c).line([130, top + 40 + i*150 + r.height + 8, 130 + int(700*k), top + 40 + i*150 + r.height + 8], fill=GOLD_L + (255,), width=2)
+        y = top + 40
+        for i, (lab, val, first) in enumerate(RS):
+            a = ease((t - 0.8 - i * 0.28) / 0.6); dx = 60 * (1 - a)
+            if lab is not None: put(c, lab, 120 - dx, y, a)
+            put(c, val, VX - dx, y, a)
+            last = (i + 1 == len(RS)) or RS[i + 1][2]           # underline after the full row
+            if last:
+                k = ease((t - 1.0 - i * 0.28) / 0.6)
+                if k > 0: ImageDraw.Draw(c).line([130, y + val.height + 8, 130 + int(700 * k), y + val.height + 8], fill=GOLD_L + (255,), width=2)
+                y += 150
+            else: y += 92
     return fn
 
 QR = qrcode.make(P.get("profile_url",""), box_size=14, border=2).convert("RGBA").resize((540, 540))
@@ -197,7 +243,7 @@ GL = ["स्वयं", "ननिहाल", "दादी", "नानी"]
 SCENES = [(4.5, s_intro),
           (4.0, s_section("व्यक्तिगत विवरण", [("आयु", age(P.get("dob",""))), ("जन्म समय", P.get("birth_time","")),
                                              ("जन्म स्थान", P.get("birthplace","")), ("ऊंचाई", P.get("height","")),
-                                             ("मांगलिक", P.get("manglik",""))], photo=PHOTO2)),
+                                             ("मांगलिक", P.get("manglik",""))])),
           (3.5, s_section("शिक्षा व कार्य", [("शिक्षा", P.get("education","")), ("कार्य", P.get("work","")),
                                             ("आय", P.get("income",""))])),
           (3.8, s_section("परिवार विवरण", [("पिता", P.get("father","")), ("", P.get("father_work","")),
