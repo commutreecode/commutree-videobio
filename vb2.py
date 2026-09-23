@@ -159,8 +159,10 @@ def s_section(title, rows, photo=None, pair=None):
     RS = [text_sprite([(f"{l}", FB, 58, MAROON), ("  —  ", FR, 50, GOLD), (v, FB, 58, INK)], maxw=W-220) for l, v in rows]
     top = 1020 + (4 - len(rows)) * 60
     def fn(c, t):
-        fr = photo_frame(470, 560, 1.10 - 0.06 * ease(t / 4), src=photo)
-        a = ease(t / 0.7); put_center(c, shadow(fr), 400 - 40, a * 0.7); put_center(c, fr, 400, a, dy=20 * (1 - a))
+        # Detail scenes: photo is FIXED (no zoom, no slide). Identical placement in every
+        # detail scene means the crossfade leaves it visually static — only text moves.
+        fr = photo_frame(470, 560, 1.0, src=photo)
+        put_center(c, shadow(fr), 400 - 40, 0.7); put_center(c, fr, 400, 1.0)
         a = ease((t - 0.35) / 0.6); sc = 0.85 + 0.15 * a
         pl = shimmer(PL, (t - 1.0) / 1.0).resize((int(PL.width * sc), int(PL.height * sc))) if a > 0 else PL
         put_center(c, pl, 1005 - pl.height // 2 - 20 + (PL.height - pl.height) // 2 + 0, a)
