@@ -161,7 +161,7 @@ def s_intro(c, t):
     # Frame and photo are FIXED (no zoom, no scale) — a slow light sweep gives the motion
     # instead, so the gold border never breathes.
     fr = photo_frame(780, 940)
-    fr = shimmer(fr, (t - 1.4) / 2.2)
+    fr = shimmer(fr, (t - 1.8) / 3.0)
     a = ease(t / 0.9)
     put_center(c, shadow(fr), 390 - 40, a * 0.8); put_center(c, fr, 390, a)
     a2 = ease((t - 0.8) / 0.8); put_center(c, shimmer(NAME, (t - 1.6) / 1.2), 1360, a2, dy=40 * (1 - a2))
@@ -197,7 +197,12 @@ def s_section(title, rows, photo=None, pair=None):
             vs = wrap(v, size, sub=not l)
             if len(vs) <= MAXL: break
         for j, sp in enumerate(vs): RS.append((LAB[i] if j == 0 else None, sp, j == 0))
-    top = 1020 + (4 - len(RS)) * 60
+    # Fit the rows between the title pill and the card bottom, whatever the row count.
+    ROW_GAP = 0.42                        # seconds between row reveals (reading pace)
+    TOP0, BOT = 1090, 1770
+    GAP = 150 if len(RS) <= 4 else max(104, int((BOT - TOP0) / len(RS)))
+    SUB = int(GAP * 0.62)
+    top = TOP0 + max(0, (4 - len(RS))) * 55 - 40
     def fn(c, t):
         # Detail scenes: photo is FIXED (no zoom, no slide). Identical placement in every
         # detail scene means the crossfade leaves it visually static — only text moves.
@@ -208,15 +213,15 @@ def s_section(title, rows, photo=None, pair=None):
         put_center(c, pl, 1005 - pl.height // 2 - 20 + (PL.height - pl.height) // 2 + 0, a)
         y = top + 40
         for i, (lab, val, first) in enumerate(RS):
-            a = ease((t - 0.8 - i * 0.28) / 0.6); dx = 60 * (1 - a)
+            a = ease((t - 0.7 - i * ROW_GAP) / 0.75); dx = 60 * (1 - a)
             if lab is not None: put(c, lab, 120 - dx, y, a)
             put(c, val, VX - dx, y, a)
             last = (i + 1 == len(RS)) or RS[i + 1][2]           # underline after the full row
             if last:
-                k = ease((t - 1.0 - i * 0.28) / 0.6)
+                k = ease((t - 0.9 - i * ROW_GAP) / 0.75)
                 if k > 0: ImageDraw.Draw(c).line([130, y + val.height + 8, 130 + int(700 * k), y + val.height + 8], fill=GOLD_L + (255,), width=2)
-                y += 150
-            else: y += 92
+                y += GAP
+            else: y += SUB
     return fn
 
 QR = qrcode.make(P.get("profile_url",""), box_size=14, border=2).convert("RGBA").resize((540, 540))
@@ -240,16 +245,24 @@ def age(dob):
 
 G = [g for g in P.get("gotra", []) if g]
 GL = ["स्वयं", "ननिहाल", "दादी", "नानी"]
-SCENES = [(4.5, s_intro),
-          (4.0, s_section("व्यक्तिगत विवरण", [("आयु", age(P.get("dob",""))), ("जन्म समय", P.get("birth_time","")),
-                                             ("जन्म स्थान", P.get("birthplace","")), ("ऊंचाई", P.get("height","")),
-                                             ("मांगलिक", P.get("manglik",""))])),
-          (3.5, s_section("शिक्षा व कार्य", [("शिक्षा", P.get("education","")), ("कार्य", P.get("work","")),
-                                            ("आय", P.get("income",""))])),
-          (3.8, s_section("परिवार विवरण", [("पिता", P.get("father","")), ("", P.get("father_work","")),
-                                          ("माता", P.get("mother",""))])),
-          (3.5, s_section("गोत्र", [(GL[i], g) for i, g in enumerate(G)])),
-          (5.0, s_qr)]
+def dur(rows, base=3.6):
+    """Scene length grows with the number of rows, so nothing flashes past."""
+    return round(base + 0.62 * len([1 for l, v in rows if v]), 1)
+
+R_PERSONAL = [("आयु", age(P.get("dob",""))), ("जन्म समय", P.get("birth_time","")),
+              ("जन्म स्थान", P.get("birthplace","")), ("ऊंचाई", P.get("height","")),
+              ("मांगलिक", P.get("manglik",""))]
+R_EDU      = [("शिक्षा", P.get("education","")), ("कार्य", P.get("work","")), ("आय", P.get("income",""))]
+R_FAMILY   = [("पिता", P.get("father","")), ("", P.get("father_work","")),
+              ("माता", P.get("mother","")), ("", P.get("mother_work",""))]
+R_GOTRA    = [(GL[i], g) for i, g in enumerate(G)]
+
+SCENES = [(5.2, s_intro),
+          (dur(R_PERSONAL), s_section("व्यक्तिगत विवरण", R_PERSONAL)),
+          (dur(R_EDU),      s_section("शिक्षा व कार्य", R_EDU)),
+          (dur(R_FAMILY),   s_section("परिवार विवरण", R_FAMILY)),
+          (dur(R_GOTRA),    s_section("गोत्र", R_GOTRA)),
+          (5.8, s_qr)]
 SCENES = [(d, f) for d, f in SCENES if f]
 
 # ---------- render: frame-by-frame -> ffmpeg pipe ----------
