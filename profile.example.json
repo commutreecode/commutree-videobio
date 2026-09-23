@@ -15,8 +15,8 @@
   "father": "श्री पिता का नाम",
   "father_work": "",
   "mother": "श्रीमती माता का नाम",
+  "mother_work": "",
   "gotra": ["गोत्र 1", "गोत्र 2", "", ""],
   "privacy": "clear",
-  "profile_url": "https://example.com/profile/SAMPLE",
-  "photos": { "p1": "", "p2": "", "father": "", "mother": "" }
+  "profile_url": "https://example.com/profile/SAMPLE"
 }
