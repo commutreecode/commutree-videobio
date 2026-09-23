@@ -265,16 +265,70 @@ SCENES = [(5.2, s_intro),
           (5.8, s_qr)]
 SCENES = [(d, f) for d, f in SCENES if f]
 
+# ---------- narration ----------
+def narration():
+    """Hindi script matching the scenes. Printed every run: paste into TTS to make voice.mp3."""
+    who = P["name"] if P.get("show_name") else ("विवाह हेतु कन्या" if P.get("type") == "कन्या" else "विवाह हेतु वर")
+    L = [f"{who}।"]
+    if P.get("city"): L.append(f"निवास {P['city']}।")
+    if age(P.get("dob","")): L.append(f"आयु {age(P['dob'])}।")
+    if P.get("birthplace"): L.append(f"जन्म स्थान {P['birthplace']}।")
+    if P.get("height"): L.append(f"ऊंचाई {P['height']}।")
+    if P.get("manglik"): L.append(f"मांगलिक {P['manglik']}।")
+    if P.get("education"): L.append(f"शिक्षा {P['education']}।")
+    if P.get("work"): L.append(f"कार्य {P['work']}।")
+    if P.get("father"): L.append(f"पिता {P['father']}।")
+    if P.get("mother"): L.append(f"माता {P['mother']}।")
+    if G: L.append("गोत्र " + ", ".join(f"{GL[i]} {g}" for i, g in enumerate(G)) + "।")
+    L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, या समाज की एप में निशुल्क रजिस्टर करें।")
+    return " ".join(L)
+
+LEAD = 0.7
+VOICE = next((f for f in ("voice.mp3", "voice.wav", "voice.m4a") if os.path.exists(f)), None)
+print("\n--- narration script (for TTS) ---\n" + narration() + "\n")
+
 # ---------- render: frame-by-frame -> ffmpeg pipe ----------
+# If a voice track exists, stretch every scene so the video runs as long as the narration
+# (lead-in 0.7s + 1.6s tail). Scenes keep their relative weight, so longer scenes stay longer.
+CUES = "voice_cues.txt"      # optional: one line-start time per scene, then the voice end time
+if VOICE and os.path.exists(CUES):
+    c = [float(x) for x in open(CUES).read().replace(",", " ").split()]
+    if len(c) == len(SCENES) + 1:
+        LEAD = c[0]
+        SCENES = [(round(c[i+1] - c[i] + XF + (LEAD if i == 0 else 0), 2), f)
+                  for i, (d, f) in enumerate(SCENES)]
+        print("scene lengths matched to narration cues")
+elif VOICE:
+    try:
+        vlen = float(subprocess.run(["ffprobe","-v","error","-show_entries","format=duration",
+                                     "-of","csv=p=0", VOICE], capture_output=True, text=True).stdout.strip())
+        want = vlen + 0.7 + 1.6
+        have = sum(d for d, _ in SCENES) - XF * (len(SCENES) - 1)
+        if want > have:
+            k = (want + XF * (len(SCENES) - 1)) / sum(d for d, _ in SCENES)
+            SCENES = [(round(d * k, 2), f) for d, f in SCENES]
+            print(f"voice {vlen:.1f}s -> scenes stretched x{k:.2f}")
+    except Exception as e:
+        print("voice length check failed:", e)
+
 starts, t0 = [], 0.0
 for d, _ in SCENES: starts.append(t0); t0 += d - XF
 TOTAL = t0 + XF
 def scene_frame(i, t):
     c = Image.new("RGBA", (W, H)); SCENES[i][1](c, t); return c
-audio = ["-i", MUSIC] if os.path.exists(MUSIC) else ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+audio = ["-stream_loop", "-1", "-i", MUSIC] if os.path.exists(MUSIC) else ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]
+if VOICE: audio += ["-i", VOICE]
 ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-                       *audio, "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p",
-                       "-c:a", "aac", "-b:a", "160k", "-af", f"afade=t=in:d=0.8,afade=t=out:st={TOTAL-1.5:.2f}:d=1.5",
+                       *audio,
+                       *(["-filter_complex",
+                          f"[1:a]atrim=0:{TOTAL:.2f},asetpts=PTS-STARTPTS,volume=0.22,afade=t=in:d=0.8,afade=t=out:st={TOTAL-1.5:.2f}:d=1.5[bg];"
+                          f"[2:a]adelay={int(LEAD*1000)}|{int(LEAD*1000)},volume=1.9[vo];"
+                          f"[bg][vo]amix=inputs=2:duration=longest:dropout_transition=0,atrim=0:{TOTAL:.2f},asetpts=PTS-STARTPTS[aout]",
+                          "-map", "0:v", "-map", "[aout]"]
+                         if VOICE else
+                         ["-af", f"afade=t=in:d=0.8,afade=t=out:st={TOTAL-1.5:.2f}:d=1.5",
+                          "-map", "0:v", "-map", "1:a"]), "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-pix_fmt", "yuv420p",
+                       "-c:a", "aac", "-b:a", "160k",
                        "-t", f"{TOTAL:.2f}", "-movflags", "+faststart", OUT], stdin=subprocess.PIPE)
 N = int(TOTAL * FPS)
 for f in range(N):
