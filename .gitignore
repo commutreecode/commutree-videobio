@@ -5,3 +5,7 @@ mother.jpg
 profile.json
 *.mp4
 fonts/
+voice.mp3
+voice.wav
+voice_cues.txt
+raw.mp3
