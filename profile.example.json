@@ -1,0 +1,22 @@
+{
+  "id": "sample",
+  "type": "वर",
+  "name": "नाम यहाँ",
+  "show_name": true,
+  "city": "शहर, राज्य",
+  "dob": "01/01/1995",
+  "birth_time": "",
+  "birthplace": "जन्म स्थान",
+  "height": "5'8\"",
+  "manglik": "नहीं",
+  "education": "शिक्षा",
+  "work": "कार्य",
+  "income": "",
+  "father": "श्री पिता का नाम",
+  "father_work": "",
+  "mother": "श्रीमती माता का नाम",
+  "gotra": ["गोत्र 1", "गोत्र 2", "", ""],
+  "privacy": "clear",
+  "profile_url": "https://example.com/profile/SAMPLE",
+  "photos": { "p1": "", "p2": "", "father": "", "mother": "" }
+}
