@@ -298,6 +298,17 @@ def s_section(title, rows, photo=None, pair=None):
 
 QR = qrcode.make(P.get("profile_url",""), box_size=14, border=2).convert("RGBA").resize((540, 540))
 QRT = Image.new("RGBA", (600, 600)); ImageDraw.Draw(QRT).rounded_rectangle([0, 0, 599, 599], 36, fill=(255,255,255,255), outline=GOLD, width=8); QRT.alpha_composite(QR, (30, 30))
+def _wa_mark(h=64):
+    """WhatsApp marker: uses wa_icon.png if present, else a green 'व्हाट्सएप' label."""
+    if os.path.exists("wa_icon.png"):
+        ic = Image.open("wa_icon.png").convert("RGBA"); ic.thumbnail((h, h)); return ic
+    t = text_sprite([("व्हाट्सएप", FB, 44, (255, 255, 255))])
+    b = t.getbbox(); t = t.crop(b) if b else t
+    pill = Image.new("RGBA", (t.width + 44, t.height + 26))
+    ImageDraw.Draw(pill).rounded_rectangle([0, 0, pill.width-1, pill.height-1],
+                                           pill.height // 2, fill=(37, 211, 102, 255))
+    pill.alpha_composite(t, (22, 13)); return pill
+
 SAMPARK = ["".join(x.split()) for x in str(P.get("contact", "")).split(",") if x.strip()]
 if SAMPARK:                                   # contact version
     CTA = [text_sprite([("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें", FB, 52, INK)]),
@@ -308,10 +319,16 @@ if SAMPARK:                                   # contact version
         return sp.crop(b) if b else sp                 # remove blank margins -> true centring
     NUMS = [_num(n) for n in SAMPARK[:2]]
 else:                                         # app-install version
-    CTA = [text_sprite([("अधिक जानकारी के लिए", FB, 60, INK)]),
-           text_sprite([("क्यूआर कोड स्कैन करें", FB, 80, MAROON)]),
-           text_sprite([("या समाज की एप में निशुल्क रजिस्टर करें", FB, 48, GOLD)])]
-    NUMS = []
+    CTA = [text_sprite([("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें,", FB, 50, INK)]),
+           text_sprite([("और समाज की एप में निशुल्क रजिस्टर करें।", FB, 50, MAROON)]),
+           text_sprite([("या समाज के नंबर पर मैसेज करें", FB, 46, INK)])]
+    def _wa_row(num="7021807342"):
+        ic = _wa_mark(64); t = text_sprite([(num, FB, 72, MAROON)])
+        b = t.getbbox(); t = t.crop(b) if b else t
+        row = Image.new("RGBA", (ic.width + 20 + t.width, max(ic.height, t.height)))
+        row.alpha_composite(ic, (0, (row.height - ic.height)//2))
+        row.alpha_composite(t, (ic.width + 20, (row.height - t.height)//2)); return row
+    NUMS = [_wa_row()]
 DIS = [text_sprite([("दी गई जानकारी संबंधित व्यक्ति द्वारा प्रदान की गई है,", FR, 32, (110, 90, 80))]),
        text_sprite([("कृपया सत्यापन कर लें।", FR, 32, (110, 90, 80))])]
 
@@ -388,7 +405,9 @@ def narration():
     if age(P.get("dob","")): L.append(f"आयु {age(P['dob'])}।")
     if P.get("birthplace"): L.append(f"जन्म स्थान {P['birthplace']}।")
     if P.get("height"): L.append(f"ऊंचाई {P['height']}।")
-    if P.get("manglik"): L.append(f"मांगलिक {P['manglik']}।")
+    if P.get("manglik"):
+        m = P["manglik"].strip()
+        L.append("मांगलिक नहीं है।" if m in ("नहीं", "नही") else f"मांगलिक {m}।")
     if P.get("education"): L.append(f"शिक्षा {P['education']}।")
     if P.get("work"): L.append(f"कार्य {P['work']}।")
     if P.get("father"): L.append(f"पिता {P['father']}।")
@@ -397,7 +416,7 @@ def narration():
     if P.get("contact"):
         L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, या नीचे दिए गए नंबर पर संपर्क करें।")
     else:
-        L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, या समाज की एप में निशुल्क रजिस्टर करें।")
+        L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, और समाज की एप में निशुल्क रजिस्टर करें। या समाज के नंबर पर व्हाट्सएप करें।")
     return " ".join(L)
 
 LEAD = 0.7
