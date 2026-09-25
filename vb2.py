@@ -9,7 +9,17 @@ from datetime import date
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageChops, features
 
 P = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "profile.json", encoding="utf-8"))
-HEADER, MUSIC = "header.png", "music.wav"
+# Header chosen by the samaj in the JSON: Maidh Kshatriya Soni gets its own header,
+# anything else (or blank) gets the generic CommuTree header.
+def _header():
+    sam = P.get("samaj", "")
+    if "मैढ़" in sam or "Maidh" in sam or "Medh" in sam:
+        for f in ("header_maidh.png", "header.png"): 
+            if os.path.exists(f): return f
+    for f in ("header_general.png", "header.png"):
+        if os.path.exists(f): return f
+    return "header.png"
+MUSIC = "music.wav"
 OUT = f"{P.get('id','out')}.mp4"
 FB, FR = "fonts/NotoSerifDevanagari-Bold.ttf", "fonts/NotoSansDevanagari-SemiBold.ttf"
 LATIN = {FB: "fonts/NotoSerif-Bold.ttf", FR: "fonts/NotoSans-SemiBold.ttf"}
@@ -59,28 +69,68 @@ def build_bg():
     bg = Image.new("RGBA", (W, H), IVORY + (255,)); d = ImageDraw.Draw(bg)
     for y in range(TOP, H):                                  # ivory -> warm cream
         t = (y - TOP) / (H - TOP); d.line([(0, y), (W, y)], fill=(253-int(10*t), 249-int(16*t), 240-int(26*t), 255))
-    # faint mandala watermark
-    wm = Image.new("RGBA", (W, H)); w = ImageDraw.Draw(wm); cx, cy = W // 2, 1150
-    for r in range(120, 620, 70): w.ellipse([cx-r, cy-r, cx+r, cy+r], outline=GOLD + (22,), width=2)
-    for k in range(48):
-        a = k * math.pi / 24; w.line([cx + 120*math.cos(a), cy + 120*math.sin(a), cx + 600*math.cos(a), cy + 600*math.sin(a)], fill=GOLD + (14,), width=2)
-    bg.alpha_composite(wm)
+    # mandala is drawn separately (MANDALA) so it can rotate slowly behind everything
     # double gold frame + corner ornaments
     d.rectangle([24, TOP, W-25, H-25], outline=GOLD, width=4); d.rectangle([38, TOP+14, W-39, H-39], outline=GOLD_L, width=2)
     for (x, y, sx, sy) in [(38, TOP+14, 1, 1), (W-39, TOP+14, -1, 1), (38, H-39, 1, -1), (W-39, H-39, -1, -1)]:
         d.line([x, y+sy*70, x+sx*70, y], fill=GOLD, width=3); d.ellipse([x+sx*18-7, y+sy*18-7, x+sx*18+7, y+sy*18+7], fill=GOLD)
-    hdr = Image.open(HEADER).convert("RGBA").crop((0, 0, W, TOP)); bg.alpha_composite(hdr, (0, 0))
+    hdr = Image.open(_header()).convert("RGBA").crop((0, 0, W, TOP)); bg.alpha_composite(hdr, (0, 0))
     return bg
 BG = build_bg()
 
+# ---- slowly turning mandala (drawn once, rotated per frame) ----
+MD = 1500
+def _mandala():
+    im = Image.new("RGBA", (MD, MD)); d = ImageDraw.Draw(im); c = MD // 2
+    for r in range(120, 700, 70): d.ellipse([c-r, c-r, c+r, c+r], outline=GOLD + (26,), width=2)
+    for k in range(48):
+        a = k * math.pi / 24
+        d.line([c + 120*math.cos(a), c + 120*math.sin(a), c + 680*math.cos(a), c + 680*math.sin(a)],
+               fill=GOLD + (16,), width=2)
+    for k in range(16):                               # petal ring, gives the turn something to read
+        a = k * math.pi / 8
+        x, y = c + 430*math.cos(a), c + 430*math.sin(a)
+        d.ellipse([x-46, y-46, x+46, y+46], outline=GOLD + (22,), width=2)
+    return im
+MANDALA = _mandala(); MCY = 1150
+_MCACHE = {}
+def mandala(c, t):
+    key = round(t * 1.6 / 2.0)                    # quantise to 2 deg — invisible, and 30x cheaper
+    rot = _MCACHE.get(key)
+    if rot is None:
+        rot = MANDALA.rotate(key * 2.0, resample=Image.BILINEAR)
+        if len(_MCACHE) > 40: _MCACHE.clear()
+        _MCACHE[key] = rot
+    c.alpha_composite(rot, ((W - MD) // 2, MCY - MD // 2))
+
+# ---- Ganesh watermark: flat 2D poster style, detail scenes only (not the intro) ----
+def _ganesh():
+    """Small flat 2D watermark in the bottom-right corner, detail scenes only."""
+    if not os.path.exists("ganesh.png"): return None, (0, 0)
+    g = Image.open("ganesh.png").convert("RGBA"); g.thumbnail((300, 300))
+    lum = ImageOps.grayscale(g.convert("RGB"))
+    q = Image.eval(lum, lambda v: 0 if v < 105 else (128 if v < 195 else 255))
+    a = ImageChops.multiply(Image.eval(q, lambda v: int((255 - v) * 0.30)), g.split()[3])
+    flat = Image.new("RGBA", g.size, (150, 96, 58, 255)); flat.putalpha(a)
+    return flat, (W - g.width - 70, H - 120 - g.height)
+GANESH, GPOS = _ganesh()
+
 # gold dust particles (subtle, drift upward)
 PARTS = [(random.uniform(60, W-60), random.uniform(TOP, H), random.uniform(2, 5), random.uniform(8, 25), random.uniform(0, 6.28)) for _ in range(40)]
+_DOTS = {}
+def _dot(r):
+    key = round(r)
+    if key not in _DOTS:
+        d = Image.new("RGBA", (key*6, key*6))
+        ImageDraw.Draw(d).ellipse([key*2, key*2, key*4, key*4], fill=GOLD_L + (255,))
+        _DOTS[key] = d.filter(ImageFilter.GaussianBlur(key * 0.6))
+    return _DOTS[key]
+
 def particles(c, t):
-    layer = Image.new("RGBA", (W, H)); d = ImageDraw.Draw(layer)
     for x, y, r, v, ph in PARTS:
-        yy = TOP + (y - TOP - v * t) % (H - TOP); a = int(90 + 70 * math.sin(t * 1.5 + ph))
-        d.ellipse([x-r, yy-r, x+r, yy+r], fill=GOLD_L + (a,))
-    c.alpha_composite(layer.filter(ImageFilter.GaussianBlur(1.5)))
+        yy = TOP + (y - TOP - v * t) % (H - TOP)
+        a = (90 + 70 * math.sin(t * 1.5 + ph)) / 255
+        c.alpha_composite(with_alpha(_dot(r), a), (int(x - r*3), int(yy - r*3)))
 
 # ---------- photo / placeholder ----------
 def placeholder(w=900, h=1100):
@@ -124,6 +174,20 @@ def photo_frame(maxw, maxh, zoom=1.0, rounded=24, src=None):
         im.alpha_composite(cap, ((im.width - cap.width)//2, im.height - cap.height - 40))
     if zoom != 1.0: im = im.resize((int(im.width * zoom), int(im.height * zoom)), Image.LANCZOS)
     return im
+def round_photo(src, d=300, label=None):
+    """Circular gold-ringed portrait (parents). Whole face kept, centre-cropped square."""
+    sq = ImageOps.fit(src, (d, d), centering=(0.5, 0.28))
+    m = Image.new("L", (d, d)); ImageDraw.Draw(m).ellipse([0, 0, d-1, d-1], fill=255)
+    im = Image.new("RGBA", (d + 26, d + 26)); dr = ImageDraw.Draw(im)
+    dr.ellipse([0, 0, d+25, d+25], fill=GOLD); dr.ellipse([7, 7, d+18, d+18], fill=GOLD_L)
+    im.paste(sq, (13, 13), m)
+    if label:
+        t = text_sprite([(label, FB, 40, MAROON)], maxw=d + 60)
+        out = Image.new("RGBA", (max(im.width, t.width), im.height + t.height - 6))
+        out.alpha_composite(im, ((out.width - im.width)//2, 0))
+        out.alpha_composite(t, ((out.width - t.width)//2, im.height - 6)); return out
+    return im
+
 def shadow(spr, blur=18, off=12, a=90):
     s = Image.new("RGBA", (spr.width + 80, spr.height + 80)); s.paste((60, 30, 10, a), (40, 40 + off), spr.split()[3])
     return s.filter(ImageFilter.GaussianBlur(blur))
@@ -206,8 +270,16 @@ def s_section(title, rows, photo=None, pair=None):
     def fn(c, t):
         # Detail scenes: photo is FIXED (no zoom, no slide). Identical placement in every
         # detail scene means the crossfade leaves it visually static — only text moves.
-        fr = photo_frame(470, 560, 1.0, src=photo)
-        put_center(c, shadow(fr), 400 - 40, 0.7); put_center(c, fr, 400, 1.0)
+        if pair and any(pair):                      # family scene with parent photos
+            sprs = [round_photo(p, 300, l) for p, l in zip(pair, ("पिता", "माता")) if p]
+            tot = sum(x.width for x in sprs) + 70 * (len(sprs) - 1); x = (W - tot) / 2
+            a = ease(t / 0.8)
+            for sp in sprs:
+                put(c, shadow(sp, 14, 8, 70), x - 40, 430 - 40, a * 0.6); put(c, sp, x, 430, a)
+                x += sp.width + 70
+        else:
+            fr = photo_frame(470, 560, 1.0, src=photo)
+            put_center(c, shadow(fr), 400 - 40, 0.7); put_center(c, fr, 400, 1.0)
         a = ease((t - 0.35) / 0.6); sc = 0.85 + 0.15 * a
         pl = shimmer(PL, (t - 1.0) / 1.0).resize((int(PL.width * sc), int(PL.height * sc))) if a > 0 else PL
         put_center(c, pl, 1005 - pl.height // 2 - 20 + (PL.height - pl.height) // 2 + 0, a)
@@ -226,14 +298,40 @@ def s_section(title, rows, photo=None, pair=None):
 
 QR = qrcode.make(P.get("profile_url",""), box_size=14, border=2).convert("RGBA").resize((540, 540))
 QRT = Image.new("RGBA", (600, 600)); ImageDraw.Draw(QRT).rounded_rectangle([0, 0, 599, 599], 36, fill=(255,255,255,255), outline=GOLD, width=8); QRT.alpha_composite(QR, (30, 30))
-CTA = [text_sprite([("अधिक जानकारी के लिए", FB, 60, INK)]), text_sprite([("क्यूआर कोड स्कैन करें", FB, 80, MAROON)]),
-       text_sprite([("या समाज की एप में निशुल्क रजिस्टर करें", FB, 48, GOLD)])]
-DIS = [text_sprite([("दी गई जानकारी संबंधित व्यक्ति द्वारा प्रदान की गई है,", FR, 32, (110, 90, 80))]), text_sprite([("कृपया सत्यापन कर लें।", FR, 32, (110, 90, 80))])]
+SAMPARK = ["".join(x.split()) for x in str(P.get("contact", "")).split(",") if x.strip()]
+if SAMPARK:                                   # contact version
+    CTA = [text_sprite([("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें", FB, 52, INK)]),
+           text_sprite([("या नीचे दिए गए नंबर पर संपर्क करें", FB, 52, MAROON)])]
+    def _num(n):
+        sp = text_sprite([(n, FB, 76, MAROON)])
+        b = sp.getbbox()
+        return sp.crop(b) if b else sp                 # remove blank margins -> true centring
+    NUMS = [_num(n) for n in SAMPARK[:2]]
+else:                                         # app-install version
+    CTA = [text_sprite([("अधिक जानकारी के लिए", FB, 60, INK)]),
+           text_sprite([("क्यूआर कोड स्कैन करें", FB, 80, MAROON)]),
+           text_sprite([("या समाज की एप में निशुल्क रजिस्टर करें", FB, 48, GOLD)])]
+    NUMS = []
+DIS = [text_sprite([("दी गई जानकारी संबंधित व्यक्ति द्वारा प्रदान की गई है,", FR, 32, (110, 90, 80))]),
+       text_sprite([("कृपया सत्यापन कर लें।", FR, 32, (110, 90, 80))])]
+
 def s_qr(c, t):
     a = ease(t / 0.8); sc = 0.8 + 0.2 * a; q = QRT.resize((int(600 * sc), int(600 * sc)))
     put_center(c, shadow(q), 430 - 40 + (600 - q.height) // 2, a * 0.7); put_center(c, q, 430 + (600 - q.height) // 2, a)
-    for i, s in enumerate(CTA):
-        a = ease((t - 0.7 - i * 0.3) / 0.6); put_center(c, shimmer(s, (t - 2.0) / 1.2) if i == 1 else s, 1100 + i * 115, a, dy=30 * (1 - a))
+    y = 1090
+    for i, sp in enumerate(CTA):
+        a = ease((t - 0.7 - i * 0.3) / 0.6)
+        put_center(c, shimmer(sp, (t - 2.0) / 1.2) if (i == 1 and not NUMS) else sp, y, a, dy=30 * (1 - a))
+        y += sp.height + 14
+    for j, sp in enumerate(NUMS):              # phone numbers, contact version only
+        a = ease((t - 1.3 - j * 0.3) / 0.6)
+        pad_x, pad_y = 56, 26
+        box = Image.new("RGBA", (sp.width + pad_x * 2, sp.height + pad_y * 2))
+        ImageDraw.Draw(box).rounded_rectangle([0, 0, box.width - 1, box.height - 1], 30,
+                                              fill=(250, 242, 228, 255), outline=GOLD, width=3)
+        box.alpha_composite(shimmer(sp, (t - 2.2 - j * 0.3) / 1.2), (pad_x, pad_y))
+        put_center(c, box, y, a)                       # digits sit dead-centre in the box
+        y += box.height + 18
     a = ease((t - 1.8) / 0.8)
     for i, s in enumerate(DIS): put_center(c, s, 1700 + i * 55, a)
 
@@ -260,7 +358,7 @@ R_GOTRA    = [(GL[i], g) for i, g in enumerate(G)]
 SCENES = [(5.2, s_intro),
           (dur(R_PERSONAL), s_section("व्यक्तिगत विवरण", R_PERSONAL)),
           (dur(R_EDU),      s_section("शिक्षा व कार्य", R_EDU)),
-          (dur(R_FAMILY),   s_section("परिवार विवरण", R_FAMILY)),
+          (dur(R_FAMILY),   s_section("परिवार विवरण", R_FAMILY, pair=(DAD, MOM))),
           (dur(R_GOTRA),    s_section("गोत्र", R_GOTRA)),
           (5.8, s_qr)]
 SCENES = [(d, f) for d, f in SCENES if f]
@@ -280,7 +378,10 @@ def narration():
     if P.get("father"): L.append(f"पिता {P['father']}।")
     if P.get("mother"): L.append(f"माता {P['mother']}।")
     if G: L.append("गोत्र " + ", ".join(f"{GL[i]} {g}" for i, g in enumerate(G)) + "।")
-    L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, या समाज की एप में निशुल्क रजिस्टर करें।")
+    if P.get("contact"):
+        L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, या नीचे दिए गए नंबर पर संपर्क करें।")
+    else:
+        L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, या समाज की एप में निशुल्क रजिस्टर करें।")
     return " ".join(L)
 
 LEAD = 0.7
@@ -332,8 +433,15 @@ ff = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "
                        "-t", f"{TOTAL:.2f}", "-movflags", "+faststart", OUT], stdin=subprocess.PIPE)
 N = int(TOTAL * FPS)
 for f in range(N):
-    t = f / FPS; frame = BG.copy(); particles(frame, t)
+    t = f / FPS; frame = BG.copy(); mandala(frame, t); particles(frame, t)
     act = [i for i, s in enumerate(starts) if s <= t < s + SCENES[i][0]]
+    if GANESH is not None:                       # fade in from scene 2 onward
+        w = 0.0
+        if len(act) == 2:
+            i0, j0 = act; k0 = ease((t - starts[j0]) / XF)
+            w = (0 if i0 == 0 else 1) * (1 - k0) + (0 if j0 == 0 else 1) * k0
+        elif act: w = 0 if act[0] == 0 else 1
+        if w > 0.01: frame.alpha_composite(with_alpha(GANESH, w), GPOS)
     if len(act) == 2:                                          # crossfade
         i, j = act; k = ease((t - starts[j]) / XF)
         a, b = scene_frame(i, t - starts[i]), scene_frame(j, t - starts[j])
