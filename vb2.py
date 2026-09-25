@@ -347,7 +347,7 @@ def dur(rows, base=3.6):
     """Scene length grows with the number of rows, so nothing flashes past."""
     return round(base + 0.62 * len([1 for l, v in rows if v]), 1)
 
-R_PERSONAL = [("आयु", age(P.get("dob",""))), ("जन्म समय", P.get("birth_time","")),
+R_PERSONAL = [("जन्म तारीख", P.get("dob","")), ("जन्म समय", P.get("birth_time","")),
               ("जन्म स्थान", P.get("birthplace","")), ("ऊंचाई", P.get("height","")),
               ("मांगलिक", P.get("manglik",""))]
 R_EDU      = [("शिक्षा", P.get("education","")), ("कार्य", P.get("work","")), ("आय", P.get("income",""))]
@@ -410,7 +410,12 @@ print("\n--- narration script (for TTS) ---\n" + narration() + "\n")
 CUES = "voice_cues.txt"      # optional: one line-start time per scene, then the voice end time
 if VOICE and os.path.exists(CUES):
     c = [float(x) for x in open(CUES).read().replace(",", " ").split()]
-    if len(c) == len(SCENES):                 # 6 line starts + voice end, cover excluded
+    if len(c) == len(SCENES) + 1:             # 7 line starts + end: cover narrated too
+        LEAD = c[0]
+        SCENES = [(round(c[i+1] - c[i] + XF + (c[0] if i == 0 else 0), 2), f)
+                  for i, (d, f) in enumerate(SCENES)]
+        print("scene lengths matched to narration cues (cover included)")
+    elif len(c) == len(SCENES):               # 6 line starts + voice end, cover excluded
         LEAD = COVER - XF + c[0]              # voice waits for the title card
         SCENES = [(COVER, SCENES[0][1])] + [
             (round(c[i+1] - c[i] + XF + (c[0] if i == 0 else 0), 2), f)
