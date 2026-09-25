@@ -137,7 +137,7 @@ def placeholder(w=900, h=1100):
     im = Image.new("RGB", (w, h), (244, 234, 214)); d = ImageDraw.Draw(im); cx = w // 2; s = (214, 190, 160)
     d.ellipse([cx-140, 230, cx+140, 510], fill=s); d.rounded_rectangle([cx-290, 540, cx+290, 1100], 230, fill=s)
     return im
-PRIVACY = P.get("privacy", "clear")
+PRIVACY = "blur" if str(P.get("version", "")).lower() == "private" else P.get("privacy", "clear")
 def load(fn):
     if PRIVACY == "hide" or not os.path.exists(fn): return None
     try: im = ImageOps.exif_transpose(Image.open(fn)).convert("RGB")
@@ -216,7 +216,7 @@ def age(dob):
     except Exception: return ""
 
 # ---------- scenes: each is (duration, draw_fn(canvas, t)) ----------
-TITLE = P["name"] if P.get("show_name") else f"विवाह हेतु {P.get('type','वर')}"
+TITLE = P["name"] if (P.get("show_name") and str(P.get("version","")).lower() != "private") else f"विवाह हेतु {P.get('type','वर')}"
 NAME = text_sprite([(TITLE, FB, 118, MAROON)])
 CITY = text_sprite([(P.get("city",""), FR, 54, GOLD)]) if P.get("city") else None
 DIV = divider(520)
@@ -309,26 +309,36 @@ def _wa_mark(h=64):
                                            pill.height // 2, fill=(37, 211, 102, 255))
     pill.alpha_composite(t, (22, 13)); return pill
 
+# version: "private" (blur, no name, samaj WhatsApp) | "samaj" (clear, name, samaj WhatsApp)
+#          | "sampark" (clear, name, family number)  | "public" (clear, name, app register only)
+VER = str(P.get("version", "sampark" if P.get("contact") else "public")).lower()
 SAMPARK = ["".join(x.split()) for x in str(P.get("contact", "")).split(",") if x.strip()]
-if SAMPARK:                                   # contact version
-    CTA = [text_sprite([("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें", FB, 52, INK)]),
-           text_sprite([("या नीचे दिए गए नंबर पर संपर्क करें", FB, 52, MAROON)])]
-    def _num(n):
-        sp = text_sprite([(n, FB, 76, MAROON)])
-        b = sp.getbbox()
-        return sp.crop(b) if b else sp                 # remove blank margins -> true centring
-    NUMS = [_num(n) for n in SAMPARK[:2]]
-else:                                         # app-install version
+SAMAJ_WA = "7021807342"
+
+def _numbox(num, mark=False):
+    t = text_sprite([(num, FB, 72, MAROON)]); b = t.getbbox(); t = t.crop(b) if b else t
+    if not mark: return t
+    ic = _wa_mark(64)
+    row = Image.new("RGBA", (ic.width + 20 + t.width, max(ic.height, t.height)))
+    row.alpha_composite(ic, (0, (row.height - ic.height) // 2))
+    row.alpha_composite(t, (ic.width + 20, (row.height - t.height) // 2)); return row
+
+if VER in ("private", "samaj"):           # samaj WhatsApp ending (private also blurs)
     CTA = [text_sprite([("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें,", FB, 50, INK)]),
            text_sprite([("और समाज की एप में निशुल्क रजिस्टर करें।", FB, 50, MAROON)]),
            text_sprite([("या समाज के नंबर पर मैसेज करें", FB, 46, INK)])]
-    def _wa_row(num="7021807342"):
-        ic = _wa_mark(64); t = text_sprite([(num, FB, 72, MAROON)])
-        b = t.getbbox(); t = t.crop(b) if b else t
-        row = Image.new("RGBA", (ic.width + 20 + t.width, max(ic.height, t.height)))
-        row.alpha_composite(ic, (0, (row.height - ic.height)//2))
-        row.alpha_composite(t, (ic.width + 20, (row.height - t.height)//2)); return row
-    NUMS = [_wa_row()]
+    NUMS = [_numbox(SAMAJ_WA, mark=True)]
+elif VER == "sampark":                    # v2 — family contact number
+    CTA = [text_sprite([("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें,", FB, 50, INK)]),
+           text_sprite([("और समाज की एप में निशुल्क रजिस्टर करें।", FB, 50, MAROON)]),
+           text_sprite([("या नीचे दिए गए नंबर पर संपर्क करें।", FB, 46, INK)])]
+    NUMS = [_numbox(n) for n in SAMPARK[:2]]
+else:                                     # v3 — public, app only
+    CTA = [text_sprite([("संपर्क करने के लिए क्यूआर कोड स्कैन करें,", FB, 52, INK)]),
+           text_sprite([("और समाज की एप में", FB, 52, MAROON)]),
+           text_sprite([("निशुल्क रजिस्टर करें।", FB, 62, MAROON)])]
+    NUMS = []
+
 DIS = [text_sprite([("दी गई जानकारी संबंधित व्यक्ति द्वारा प्रदान की गई है,", FR, 32, (110, 90, 80))]),
        text_sprite([("कृपया सत्यापन कर लें।", FR, 32, (110, 90, 80))])]
 
@@ -413,10 +423,12 @@ def narration():
     if P.get("father"): L.append(f"पिता {P['father']}।")
     if P.get("mother"): L.append(f"माता {P['mother']}।")
     if G: L.append("गोत्र " + ", ".join(f"{GL[i]} {g}" for i, g in enumerate(G)) + "।")
-    if P.get("contact"):
-        L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, या नीचे दिए गए नंबर पर संपर्क करें।")
-    else:
+    if VER == "private":
         L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, और समाज की एप में निशुल्क रजिस्टर करें। या समाज के नंबर पर व्हाट्सएप करें।")
+    elif VER == "sampark":
+        L.append("अधिक जानकारी के लिए क्यूआर कोड स्कैन करें, और समाज की एप में निशुल्क रजिस्टर करें। या नीचे दिए गए नंबर पर संपर्क करें।")
+    else:
+        L.append("संपर्क करने के लिए क्यूआर कोड स्कैन करें, और समाज की एप में निशुल्क रजिस्टर करें।")
     return " ".join(L)
 
 LEAD = 0.7
