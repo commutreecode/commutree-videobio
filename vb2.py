@@ -355,7 +355,23 @@ R_FAMILY   = [("पिता", P.get("father","")), ("", P.get("father_work","")
               ("माता", P.get("mother","")), ("", P.get("mother_work",""))]
 R_GOTRA    = [(GL[i], g) for i, g in enumerate(G)]
 
-SCENES = [(5.2, s_intro),
+COVER = 2.2                                   # title card length (no fade-in at t=0)
+def _cover_art():
+    if not os.path.exists("ganesh.png"): return None
+    g = Image.open("ganesh.png").convert("RGBA"); g.thumbnail((520, 520)); return g
+COVER_ART = _cover_art()
+COVER_T1 = text_sprite([("विवाह हेतु बायोडाटा", FB, 86, MAROON)])
+COVER_T2 = text_sprite([(P.get("samaj", "") or "CommuTree", FB, 40, GOLD)], maxw=W-200)
+
+def s_cover(c, t):
+    y = 520
+    if COVER_ART:
+        put_center(c, COVER_ART, y - 40); y += COVER_ART.height - 20
+    put_center(c, COVER_T1, y + 40)
+    put_center(c, DIV, y + 40 + COVER_T1.height + 10)
+    put_center(c, COVER_T2, y + 40 + COVER_T1.height + 60)
+
+SCENES = [(COVER, s_cover), (5.2, s_intro),
           (dur(R_PERSONAL), s_section("व्यक्तिगत विवरण", R_PERSONAL)),
           (dur(R_EDU),      s_section("शिक्षा व कार्य", R_EDU)),
           (dur(R_FAMILY),   s_section("परिवार विवरण", R_FAMILY, pair=(DAD, MOM))),
@@ -394,10 +410,11 @@ print("\n--- narration script (for TTS) ---\n" + narration() + "\n")
 CUES = "voice_cues.txt"      # optional: one line-start time per scene, then the voice end time
 if VOICE and os.path.exists(CUES):
     c = [float(x) for x in open(CUES).read().replace(",", " ").split()]
-    if len(c) == len(SCENES) + 1:
-        LEAD = c[0]
-        SCENES = [(round(c[i+1] - c[i] + XF + (LEAD if i == 0 else 0), 2), f)
-                  for i, (d, f) in enumerate(SCENES)]
+    if len(c) == len(SCENES):                 # 6 line starts + voice end, cover excluded
+        LEAD = COVER - XF + c[0]              # voice waits for the title card
+        SCENES = [(COVER, SCENES[0][1])] + [
+            (round(c[i+1] - c[i] + XF + (c[0] if i == 0 else 0), 2), f)
+            for i, (d, f) in enumerate(SCENES[1:])]
         print("scene lengths matched to narration cues")
 elif VOICE:
     try:
@@ -439,8 +456,8 @@ for f in range(N):
         w = 0.0
         if len(act) == 2:
             i0, j0 = act; k0 = ease((t - starts[j0]) / XF)
-            w = (0 if i0 == 0 else 1) * (1 - k0) + (0 if j0 == 0 else 1) * k0
-        elif act: w = 0 if act[0] == 0 else 1
+            w = (0 if i0 <= 1 else 1) * (1 - k0) + (0 if j0 <= 1 else 1) * k0
+        elif act: w = 0 if act[0] <= 1 else 1
         if w > 0.01: frame.alpha_composite(with_alpha(GANESH, w), GPOS)
     if len(act) == 2:                                          # crossfade
         i, j = act; k = ease((t - starts[j]) / XF)
